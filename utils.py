@@ -15,7 +15,7 @@ def save_model(model: torch.nn.Module, target_dir: str, model_name: str):
         target_dir: A directory for saving the model to.
         model_name: A filename for the saved model. Should include either ".pth" or ".pt" as the file extension.
 
-    Example:
+    Example usage:
         save_model(model=UNet_model, target_dir="/content/Output_models",
                     model_name="UNet_bs_16_lr_0.01_Epoch_5.pth")
     """

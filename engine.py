@@ -106,7 +106,7 @@ class Trainer:
 
         time_elapsed = time.time() - start_time
         print('-' * 20)
-        print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s. Saving model to: {self.save_dir}')
+        print(f'Training complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s. Saving model to: {self.save_dir}.')
 
         return self.results
         
@@ -164,9 +164,7 @@ class Trainer:
 
         # Write the date to TensorBoard log dir
         self.writer.add_scalar("Loss/train", np.mean(running_losses), self.curr_epoch)
-        self.writer.add_scalar("Acc/train", np.mean(running_accs), self.curr_epoch)
-
-        batch_iter.close()
+        self.writer.add_scalar("Acc/train", np.mean(running_accs), self.curr_epoch)   
 
     def val_epoch(self):
         """
@@ -211,4 +209,3 @@ class Trainer:
         self.writer.add_scalar("Loss/val", np.mean(running_losses), self.curr_epoch)
         self.writer.add_scalar("Acc/val", np.mean(running_accs), self.curr_epoch)
 
-        batch_iter.close()
