@@ -101,3 +101,4 @@ def plot_confusion_matrix(labels, pred_labels, class_names):
     plt.xticks(rotation = 90)
     plt.xlabel('Predicted Label', fontsize = 10)
     plt.ylabel('True Label', fontsize = 10)
+    
