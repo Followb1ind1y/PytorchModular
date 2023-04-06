@@ -1,0 +1,6 @@
+hymenoptera_data/
+OutputModel/
+runs/
+.DS_Store
+*.csv
+train.py

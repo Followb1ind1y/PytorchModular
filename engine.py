@@ -5,6 +5,7 @@ import torch
 import time
 import numpy as np
 import utils
+#from PytorchModular import utils
 
 from torch.utils.tensorboard import SummaryWriter
 from tqdm.auto import tqdm, trange
@@ -98,7 +99,7 @@ class Trainer:
             progressbar.set_postfix(BestTrainAcc = np.max(self.results["train_acc"]), BestTrainLoss=np.min(self.results["train_loss"]), 
                                     BestValAcc=np.max(self.results["val_acc"]), BestValLoss = np.min(self.results["val_loss"]))
             # Display the statistics for current Epoch
-            print(f'Epoch {self.curr_epoch}: Train Acc: {self.results["train_acc"][-1]} Train loss: {self.results["train_loss"][-1]} Val Acc: {self.results["val_acc"][-1]} Val loss: {self.results["val_loss"][-1]}')
+            print(f'\n Epoch {self.curr_epoch}: Train Acc: {self.results["train_acc"][-1]} Train loss: {self.results["train_loss"][-1]} Val Acc: {self.results["val_acc"][-1]} Val loss: {self.results["val_loss"][-1]}')
 
             # Save checkpoints every epoch
             save_model_name = f'Model_Epoch_{self.curr_epoch}.pth'
