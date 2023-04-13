@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-__all__ = ["LeNet", "LeNetBatchNorm", "AlexNet", "VGG11", "NiN", "GoogLeNet", "ResNet18"]
+__all__ = ["LeNet", "LeNetBatchNorm", "AlexNet", "VGG11", "NiN", "GoogLeNet", "ResNet18", "DenseNet"]
 
 def init_cnn(module):
     """
@@ -336,10 +336,11 @@ class ResNet18(nn.Module):
         num_classes: The number of output class.
 
     Example usage:
-        model_ResNet18 = ResNet18(arch=((2, 64, 64), (2, 64, 128), (2, 128, 256), (2, 256, 512)), num_classes=10)
+        model_ResNet18 = ResNet18(arch=((2, 64, 64), (2, 64, 128), (2, 128, 256), (2, 256, 512)), in_c=1, num_classes=10)
     """
-    def __init__(self, arch, num_classes=10):
+    def __init__(self, arch, in_c, num_classes=10):
         super().__init__()
+        self.in_c = in_c
         self.net = nn.Sequential(self.b1())
         for i, b in enumerate(arch):
             self.net.add_module(f'b{i+2}', self.block(*b, first_block=(i==0)))
@@ -353,7 +354,7 @@ class ResNet18(nn.Module):
         return self.net(x)
 
     def b1(self):
-        return nn.Sequential(nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),
+        return nn.Sequential(nn.Conv2d(self.in_c, 64, kernel_size=7, stride=2, padding=3),
                              nn.BatchNorm2d(64), 
                              nn.ReLU(),
                              nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
@@ -379,3 +380,95 @@ class ResNet18(nn.Module):
             else:
                 blk.append(Residual(out_channels, out_channels))
         return nn.Sequential(*blk)
+
+class DenseBlock(nn.Module):
+    """
+    Initial the Dense Block consists of multiple convolution blocks
+
+    Args:
+        num_convs: The number of convolution blocks in the Dense block.
+        in_channels: The number of input channel.
+        out_channels: The number of output channel.
+
+    Example usage:
+        DenseBlock(num_convs, num_channels, growth_rate)
+    """
+    def __init__(self, num_convs, in_channels, out_channels):
+        super(DenseBlock, self).__init__()
+        layer = []
+        for i in range(num_convs):
+            in_c = in_channels + i * out_channels
+            layer.append(self.conv_block(in_c, out_channels))
+        self.net = nn.Sequential(*layer)
+        self.out_channels = in_channels + num_convs * out_channels
+
+    def forward(self, X):
+        for blk in self.net:
+            Y = blk(X)
+            X = torch.cat((X, Y), dim=1)
+        return X
+    
+    def conv_block(self, in_c, out_c):
+        return nn.Sequential(nn.BatchNorm2d(in_c), 
+                             nn.ReLU(),
+                             nn.Conv2d(in_c, out_c, kernel_size=3, padding=1))
+
+class TransitionBlock(nn.Module):
+    """
+    Initial the Transition Block to control the complexity of the DenseNet model
+
+    Args:
+        in_channels: The number of input channel.
+        out_channels: The number of output channel.
+
+    Example usage:
+        TransitionBlock(num_channels, num_channels // 2)
+    """
+    def __init__(self, in_channels, out_channels):
+        super(TransitionBlock, self).__init__()
+        self.blk = nn.Sequential(nn.BatchNorm2d(in_channels), 
+                                 nn.ReLU(),
+                                 nn.Conv2d(in_channels, out_channels, kernel_size=1),
+                                 nn.AvgPool2d(kernel_size=2, stride=2)
+                                 )
+    def forward(self, X):
+        return self.blk(X)
+
+class DenseNet(nn.Module):
+    """
+    The DenseNet model. (Input shape = in_c*96*96 -> Output Size = num_classes)
+
+    Args:
+        in_c: The Number of input channels.
+        num_channels: Current output channels after block1.
+        growth_rate: The increase number of each ConV2d layers.
+        arch: A Tuple contains numbers of Conv2D will be used in the DenseBlock.
+        num_classes: The number of output class.
+
+    Example usage:
+        DenseNet(in_c=1, num_channels=64, growth_rate=32, arch=(4, 4, 4, 4), num_classes=10)
+    """
+    def __init__(self, in_c=1, num_channels=64, growth_rate=32, arch=(4, 4, 4, 4), num_classes=10):
+        super(DenseNet, self).__init__()
+        self.in_c = in_c
+        self.net = nn.Sequential(self.b1())
+        for i, num_convs in enumerate(arch):
+            self.net.add_module(f'dense_blk{i+1}', DenseBlock(num_convs, num_channels, growth_rate))
+            num_channels += num_convs * growth_rate
+
+            if i != len(arch) - 1:
+                self.net.add_module(f'tran_blk{i+1}', TransitionBlock(num_channels, num_channels // 2))
+                num_channels //= 2
+
+        self.net.add_module('Classifier', nn.Sequential(nn.BatchNorm2d(num_channels), nn.ReLU(),
+                                                        nn.AdaptiveAvgPool2d((1, 1)), nn.Flatten(),
+                                                        nn.Linear(num_channels, num_classes)))
+        self.net.apply(init_cnn)
+    
+    def forward(self, x):
+        return self.net(x)
+    
+    def b1(self):
+        return nn.Sequential(nn.Conv2d(self.in_c, 64, kernel_size=7, stride=2, padding=3),
+                             nn.BatchNorm2d(64), nn.ReLU(),
+                             nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
