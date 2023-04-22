@@ -54,9 +54,9 @@ class Trainer:
         self.device = device
         # Create empty results dictionary
         self.results = {"train_loss": [],
-                        "train_acc": [],
+                        "train_eval": [],
                         "val_loss": [],
-                        "val_acc": []
+                        "val_eval": []
                         }
         
     def train(self):
@@ -69,15 +69,15 @@ class Trainer:
 
             For example if training for epochs=2: 
                 {train_loss: [2.0616, 1.0537],
-                  train_acc: [0.3945, 0.3945],
+                  train_eval: [0.3945, 0.3945],
                   test_loss: [1.2641, 1.5706],
-                  test_acc: [0.3400, 0.2973]} 
+                  test_eval: [0.3400, 0.2973]} 
 
         Example usage:
             model_results = trainer.train()
             -->
-            Epoch 9: Train Acc: 0.9453125 Train loss: 0.12280523835215718 Val Acc: 0.95 Val loss: 0.1460084779188037
-            Epoch 10: Train Acc: 0.95703125 Train loss: 0.11239275464322418 Val Acc: 0.95 Val loss: 0.14841991513967515
+            Epoch 9: Train eval: 0.9453125 Train loss: 0.12280523835215718 Val eval: 0.95 Val loss: 0.1460084779188037
+            Epoch 10: Train eval: 0.95703125 Train loss: 0.11239275464322418 Val eval: 0.95 Val loss: 0.14841991513967515
             --------------------
             Training complete in 0m 27s 
         """
@@ -96,10 +96,10 @@ class Trainer:
             self.val_epoch()
 
             #  Update the current best metric and loss
-            progressbar.set_postfix(BestTrainAcc = np.max(self.results["train_acc"]), BestTrainLoss=np.min(self.results["train_loss"]), 
-                                    BestValAcc=np.max(self.results["val_acc"]), BestValLoss = np.min(self.results["val_loss"]))
+            progressbar.set_postfix(BestTrainEval = np.max(self.results["train_eval"]), BestTrainLoss=np.min(self.results["train_loss"]), 
+                                    BestValEval=np.max(self.results["val_eval"]), BestValLoss = np.min(self.results["val_loss"]))
             # Display the statistics for current Epoch
-            print(f'\n Epoch {self.curr_epoch}: Train Acc: {self.results["train_acc"][-1]} Train loss: {self.results["train_loss"][-1]} Val Acc: {self.results["val_acc"][-1]} Val loss: {self.results["val_loss"][-1]}')
+            print(f'\n Epoch {self.curr_epoch}: Train Eval: {self.results["train_eval"][-1]} Train loss: {self.results["train_loss"][-1]} Val Eval: {self.results["val_eval"][-1]} Val loss: {self.results["val_loss"][-1]}')
 
             # Save checkpoints every epoch
             save_model_name = f'Model_Epoch_{self.curr_epoch}.pth'
@@ -123,7 +123,7 @@ class Trainer:
         self.model.train()
 
         # Setup train loss and train accuracy values
-        running_accs, running_losses = [], []
+        running_evals, running_losses = [], []
 
         batch_iter = tqdm(
             enumerate(self.dataloaders['train']),
@@ -140,7 +140,7 @@ class Trainer:
             # 1. Forward pass
             outputs = self.model(inputs)
 
-            # 2. Calculate and accumulate the loss
+            # 2. Calculate and evalumulate the loss
             loss = self.criterion(outputs, targets)
             loss_value = loss.item()
             running_losses.append(loss_value)
@@ -156,16 +156,16 @@ class Trainer:
 
             # 6. Calculate the metric
             y_pred_class = torch.argmax(torch.softmax(outputs, dim=1), dim=1)
-            acc_value = (y_pred_class == targets).sum().item()/len(outputs)
-            running_accs.append(acc_value)
+            eval_value = (y_pred_class == targets).sum().item()/len(outputs)
+            running_evals.append(eval_value)
 
         self.scheduler.step()
         self.results["train_loss"].append(np.mean(running_losses))
-        self.results["train_acc"].append(np.mean(running_accs))
+        self.results["train_eval"].append(np.mean(running_evals))
 
         # Write the date to TensorBoard log dir
         self.writer.add_scalar("Loss/train", np.mean(running_losses), self.curr_epoch)
-        self.writer.add_scalar("Acc/train", np.mean(running_accs), self.curr_epoch)   
+        self.writer.add_scalar("Eval/train", np.mean(running_evals), self.curr_epoch)   
 
     def val_epoch(self):
         """
@@ -175,7 +175,7 @@ class Trainer:
         """
         # Validation mode
         self.model.eval()
-        running_accs, running_losses = [], []
+        running_evals, running_losses = [], []
 
         batch_iter = tqdm(
             enumerate(self.dataloaders['val']),
@@ -200,13 +200,13 @@ class Trainer:
 
                 # Calculate the metric
                 y_pred_class = torch.argmax(torch.softmax(outputs, dim=1), dim=1)
-                acc_value = (y_pred_class == targets).sum().item()/len(outputs)
-                running_accs.append(acc_value)
+                eval_value = (y_pred_class == targets).sum().item()/len(outputs)
+                running_evals.append(eval_value)
 
         self.results["val_loss"].append(np.mean(running_losses))
-        self.results["val_acc"].append(np.mean(running_accs))
+        self.results["val_eval"].append(np.mean(running_evals))
         
         # Write the date to TensorBoard log dir
         self.writer.add_scalar("Loss/val", np.mean(running_losses), self.curr_epoch)
-        self.writer.add_scalar("Acc/val", np.mean(running_accs), self.curr_epoch)
+        self.writer.add_scalar("Eval/val", np.mean(running_evals), self.curr_epoch)
 
