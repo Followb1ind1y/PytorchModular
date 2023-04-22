@@ -482,22 +482,22 @@ class TinySSD(nn.Module):
     A Tiny Single Shot Multibox Detection Model (SSD). (Input shape = d*256*256)
 
     Args:
-        num_classes: The number of output class.
+        number_classes: The number of output class.
 
     Example usage:
-        model_TinySSD = TinySSD(num_classes=10)
+        model_TinySSD = TinySSD(number_classes=10)
     """
     def __init__(self, number_classes, **kwargs) -> None:
         super(TinySSD, self).__init__(**kwargs)
         self.number_classes = number_classes
-        self.size= [[0.2, 0.272], [0.37, 0.447], [0.54, 0.619], [0.71, 0.79], [0.88, 0.961]]
+        self.sizes = [[0.2, 0.272], [0.37, 0.447], [0.54, 0.619], [0.71, 0.79], [0.88, 0.961]]
         self.ratios = [[1, 2, 0.5]] * 5
         self.num_anchors = len(self.sizes[0]) + len(self.ratios[0]) - 1
         idx_to_in_channels = [64, 128, 128, 128, 128]
 
         for i in range(5):
             setattr(self, f'blk_{i}', self.get_blk(i))
-            setattr(self, f'cls_{i}', self.cls_predictor(idx_to_in_channels[i], self.num_anchors, self.num_classes))
+            setattr(self, f'cls_{i}', self.cls_predictor(idx_to_in_channels[i], self.num_anchors, self.number_classes))
             setattr(self, f'bbox_{i}', self.bbox_predictor(idx_to_in_channels[i], self.num_anchors))
     
     def forward(self, X):
@@ -508,7 +508,7 @@ class TinySSD(nn.Module):
         anchors = torch.cat(anchors, dim=1)
         cls_preds = self.concat_preds(cls_preds)
         cls_preds = cls_preds.reshape(
-            cls_preds.shape[0], -1, self.num_classes + 1)
+            cls_preds.shape[0], -1, self.number_classes + 1)
         bbox_preds = self.concat_preds(bbox_preds)
         return anchors, cls_preds, bbox_preds
     
@@ -587,7 +587,7 @@ class TinySSD(nn.Module):
         """
         return nn.Conv2d(num_inputs, num_anchors * (num_classes + 1), kernel_size=3, padding=1)
     
-    def bbox_predictor(num_inputs, num_anchors):
+    def bbox_predictor(self, num_inputs, num_anchors):
         """
         The Bounding Box Prediction Layer used after each block to get offsets for the anchor boxes.
 
