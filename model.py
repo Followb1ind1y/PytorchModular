@@ -7,7 +7,9 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-__all__ = ["LeNet", "LeNetBatchNorm", "AlexNet", "VGG11", "NiN", "GoogLeNet", "ResNet18", "DenseNet"]
+__all__ = ["LeNet", "LeNetBatchNorm", "AlexNet", "VGG11", "NiN", "GoogLeNet", "ResNet18", "DenseNet", "TinySSD"]
+
+##################################################### Image Classification #####################################################
 
 def init_cnn(module):
     """
@@ -472,3 +474,204 @@ class DenseNet(nn.Module):
         return nn.Sequential(nn.Conv2d(self.in_c, 64, kernel_size=7, stride=2, padding=3),
                              nn.BatchNorm2d(64), nn.ReLU(),
                              nn.MaxPool2d(kernel_size=3, stride=2, padding=1))
+
+##################################################### Object Detection #####################################################
+
+class TinySSD(nn.Module):
+    """
+    A Tiny Single Shot Multibox Detection Model (SSD). (Input shape = d*256*256)
+
+    Args:
+        num_classes: The number of output class.
+
+    Example usage:
+        model_TinySSD = TinySSD(num_classes=10)
+    """
+    def __init__(self, number_classes, **kwargs) -> None:
+        super(TinySSD, self).__init__(**kwargs)
+        self.number_classes = number_classes
+        self.size= [[0.2, 0.272], [0.37, 0.447], [0.54, 0.619], [0.71, 0.79], [0.88, 0.961]]
+        self.ratios = [[1, 2, 0.5]] * 5
+        self.num_anchors = len(self.sizes[0]) + len(self.ratios[0]) - 1
+        idx_to_in_channels = [64, 128, 128, 128, 128]
+
+        for i in range(5):
+            setattr(self, f'blk_{i}', self.get_blk(i))
+            setattr(self, f'cls_{i}', self.cls_predictor(idx_to_in_channels[i], self.num_anchors, self.num_classes))
+            setattr(self, f'bbox_{i}', self.bbox_predictor(idx_to_in_channels[i], self.num_anchors))
+    
+    def forward(self, X):
+        anchors, cls_preds, bbox_preds = [None] * 5, [None] * 5, [None] * 5
+        for i in range(5):
+            X, anchors[i], cls_preds[i], bbox_preds[i] = self.blk_forward(X, getattr(self, f'blk_{i}'), self.sizes[i], self.ratios[i],
+                                                                          getattr(self, f'cls_{i}'), getattr(self, f'bbox_{i}'))
+        anchors = torch.cat(anchors, dim=1)
+        cls_preds = self.concat_preds(cls_preds)
+        cls_preds = cls_preds.reshape(
+            cls_preds.shape[0], -1, self.num_classes + 1)
+        bbox_preds = self.concat_preds(bbox_preds)
+        return anchors, cls_preds, bbox_preds
+    
+    def down_sample_blk(self, in_channels, out_channels):
+        """
+        Buliding downsampling block that halves the height and width of input feature maps.
+        Each downsampling block consists of two 3x3 convolutional layers with padding of 1 
+        followed by a 2x2 max-pooling layer with stride of 2. 
+    
+         Args:
+            in_channels: Number of input channels in the down sample block.
+            out_channels: Number of output channels in the down sample VGG block.
+
+        Example usage:
+            down_sample_blk(3, 16)
+        """
+        blk = []
+
+        for _ in range(2):
+            blk.append(nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1))
+            blk.append(nn.BatchNorm2d(out_channels))
+            blk.append(nn.ReLU())
+            in_channels = out_channels
+        blk.append(nn.MaxPool2d(2))
+
+        return nn.Sequential(*blk)
+    
+    def base_net(self):
+        """
+        A small base network consisting of three downsampling blocks that double the number of channels at each block.
+        Input Image: 256x256 -> Feature Map: 32x32  
+
+        Example usage:
+            base_net()
+        """
+        blk = []
+
+        num_filters = [3, 16, 32, 64]
+        for i in range(len(num_filters) - 1):
+            blk.append(self.down_sample_blk(num_filters[i], num_filters[i+1]))
+
+        return nn.Sequential(*blk)
+    
+    def get_blk(self, i):
+        """
+        Get the five blocks in the TinySSD based on the index. 
+        (i.e. 0. base_net, 1-3. downsampling blocks, 4. downsampling block using global maxpool)
+
+        Args:
+            i: An integer use to indicate the index of the block.
+
+        Example usage:
+            get_blk(0) -> base_net()
+        """
+        if i == 0:
+            blk = self.base_net()
+        elif i == 1:
+            blk = self.down_sample_blk(64, 128)
+        elif i == 4:
+            blk = nn.AdaptiveMaxPool2d((1,1))
+        else:
+            blk = self.down_sample_blk(128, 128)
+        return blk
+    
+    def cls_predictor(self, num_inputs, num_anchors, num_classes):
+        """
+        The Class Prediction Layer used after each block to get prediction result for the anchor boxes.
+
+        Args:
+            num_inputs: The number of input channels.
+            num_anchors: The number of the anchor boxes.
+            num_classes: The number of the output classes.
+
+        Example usage:
+             cls_predictor(idx_to_in_channels[i], num_anchors, num_classes)
+        """
+        return nn.Conv2d(num_inputs, num_anchors * (num_classes + 1), kernel_size=3, padding=1)
+    
+    def bbox_predictor(num_inputs, num_anchors):
+        """
+        The Bounding Box Prediction Layer used after each block to get offsets for the anchor boxes.
+
+        Args:
+            num_inputs: The number of input channels.
+            num_anchors: The number of the anchor boxes.
+
+        Example usage:
+            bbox_predictor(idx_to_in_channels[i], self.num_anchors)
+        """
+        return nn.Conv2d(num_inputs, num_anchors * 4, kernel_size=3, padding=1)
+
+    def multibox_prior(self, data, sizes, ratios):
+        """
+        Generate anchor boxes with different shapes centered on each pixel.
+        """
+        in_height, in_width = data.shape[-2:]
+        device, num_sizes, num_ratios = data.device, len(sizes), len(ratios)
+        boxes_per_pixel = (num_sizes + num_ratios - 1)
+        size_tensor = torch.tensor(sizes, device=device)
+        ratio_tensor = torch.tensor(ratios, device=device)
+        # Offsets are required to move the anchor to the center of a pixel. Since
+        # a pixel has height=1 and width=1, we choose to offset our centers by 0.5
+        offset_h, offset_w = 0.5, 0.5
+        steps_h = 1.0 / in_height  # Scaled steps in y axis
+        steps_w = 1.0 / in_width  # Scaled steps in x axis
+
+        # Generate all center points for the anchor boxes
+        center_h = (torch.arange(in_height, device=device) + offset_h) * steps_h
+        center_w = (torch.arange(in_width, device=device) + offset_w) * steps_w
+        shift_y, shift_x = torch.meshgrid(center_h, center_w, indexing='ij')
+        shift_y, shift_x = shift_y.reshape(-1), shift_x.reshape(-1)
+
+        # Generate `boxes_per_pixel` number of heights and widths that are later
+        # used to create anchor box corner coordinates (xmin, xmax, ymin, ymax)
+        w = torch.cat((size_tensor * torch.sqrt(ratio_tensor[0]),
+                   sizes[0] * torch.sqrt(ratio_tensor[1:])))\
+                   * in_height / in_width  # Handle rectangular inputs
+        h = torch.cat((size_tensor / torch.sqrt(ratio_tensor[0]),
+                   sizes[0] / torch.sqrt(ratio_tensor[1:])))
+        # Divide by 2 to get half height and half width
+        anchor_manipulations = torch.stack((-w, -h, w, h)).T.repeat(
+                                        in_height * in_width, 1) / 2
+
+        # Each center point will have `boxes_per_pixel` number of anchor boxes, so
+        # generate a grid of all anchor box centers with `boxes_per_pixel` repeats
+        out_grid = torch.stack([shift_x, shift_y, shift_x, shift_y],
+                dim=1).repeat_interleave(boxes_per_pixel, dim=0)
+        output = out_grid + anchor_manipulations
+        return output.unsqueeze(0)
+    
+    def blk_forward(self, X, blk, size, ratio, cls_predictor, bbox_predictor):
+        """
+        Define the forward propagation for each block. Outputs include 
+        (i) CNN feature maps Y, (ii) anchor boxes generated using Y at the current scale, 
+        and (iii) classes and offsets predicted (based on Y) for these anchor boxes.
+
+        Args:
+            X: The input of the block.
+            blk: A pre-defined i-th block.
+            size: A list of two scale values. The interval between 0.2 and 1.05 split evenly into five 
+                sections to determine the smaller scale values at the five blocks: 0.2, 0.37, 0.54, 0.71, and 0.88.
+            ratio: The aspect ratios for each block.
+            cls_predictor: A pre-defined i-th class predictor.
+            bbox_predictor: A pre-defined i-th bounding box predictor.
+
+
+        Example usage:
+            blk_forward(X, self.blk_{i}, sizes[i], ratios[i], self.cls_{i}, self.bbox_{i})
+        """
+        Y = blk(X)
+        anchors = self.multibox_prior(Y, sizes=size, ratios=ratio)
+        cls_preds = cls_predictor(Y)
+        bbox_preds = bbox_predictor(Y)
+        return (Y, anchors, cls_preds, bbox_preds)
+    
+    def flatten_pred(self, pred):
+        """
+        Flatten the prediction output into a two-dimensional tensor with shape (batch size, height, width, number of channels)
+        """
+        return torch.flatten(pred.permute(0, 2, 3, 1), start_dim=1)
+
+    def concat_preds(self, preds):
+        """
+        Concatenate prediction outputs at different scales for the same minibatch.
+        """
+        return torch.cat([self.flatten_pred(p) for p in preds], dim=1)
